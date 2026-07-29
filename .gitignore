@@ -1,0 +1,33 @@
+# Environment variables / Secrets (CRITICAL)
+.env
+.env.*
+*.pem
+*.key
+
+# Python virtual environments
+.venv/
+venv/
+ENV/
+env/
+
+# Python cache & build files
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.python-version
+
+# IDE & Editor configurations
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# macOS system files
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Logs & temporary files
+*.log
+*.tmp
