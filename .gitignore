@@ -4,6 +4,10 @@
 *.pem
 *.key
 
+resources.json
+structure.json
+content.json
+
 # Python virtual environments
 .venv/
 venv/

@@ -11,7 +11,7 @@ load_dotenv()
 # Read configurations from environment variables
 CONNECTION_STRING = os.getenv("AZURE_STORAGE_CONNECTION_STRING")
 CONTAINER_NAME = os.getenv("AZURE_CONTAINER_NAME", "users")
-MAX_USER_SAMPLES = 50  # Number of user directories to sample
+MAX_USER_SAMPLES = 500  # Number of user directories to sample
 
 
 def inspect_user_blob_keys(connection_string: str, container_name: str, sample_limit: int):
