@@ -88,7 +88,6 @@ def sync_azure_media_library():
         for blob in blobs:
             if blob.size > 0:
                 blob_client = container_client.get_blob_client(blob.name)
-                # Filter by extension or content type if desired, or grab everything in resourceblobs
                 upload_blob_to_strapi(blob_client, blob.name)
                 count += 1
                 
@@ -318,7 +317,7 @@ def import_all_to_strapi():
     sync_azure_media_library()
 
     merged_routes = merge_json_files("content.json", "structure.json", "resources.json")
-    print(f"🚀 Starting page import of {len(merged_routes)} unique routes into Strapi...\n")
+    print(f"🚀 Starting page import/update of {len(merged_routes)} unique routes into Strapi...\n")
 
     rest_headers = {
         "Authorization": f"Bearer {STRAPI_API_TOKEN}",
@@ -326,8 +325,10 @@ def import_all_to_strapi():
     }
 
     for raw_route, blocks in merged_routes.items():
-        slug = raw_route.lstrip("#").strip()
-        title = slug.split("/")[-1].replace("-", " ").title() or "Home"
+        # Clean the route to form a unique, full-path slug
+        # e.g., "#home/dealing-se/sleep/help" becomes "home-dealing-se-sleep-help"
+        slug = raw_route.lstrip("#").strip().replace("/", "-").lower()
+        title = slug.split("-")[-1].replace("-", " ").title() or "Home"
 
         dynamic_zone_payload = []
 
@@ -363,9 +364,23 @@ def import_all_to_strapi():
         }
 
         try:
-            res = requests.post(f"{STRAPI_URL}/api/pages", headers=rest_headers, json=payload)
+            # Check if page already exists by slug to perform an Upsert (Update vs Create)
+            check_res = requests.get(f"{STRAPI_URL}/api/pages?filters[slug][$eq]={slug}", headers=rest_headers)
+            existing_id = None
+            if check_res.status_code == 200:
+                data = check_res.json().get("data", [])
+                if data:
+                    existing_id = data[0]["id"]
+
+            if existing_id:
+                res = requests.put(f"{STRAPI_URL}/api/pages/{existing_id}", headers=rest_headers, json=payload)
+                action = "Updated"
+            else:
+                res = requests.post(f"{STRAPI_URL}/api/pages", headers=rest_headers, json=payload)
+                action = "Imported"
+
             if res.status_code in [200, 201]:
-                print(f"✅ Imported Page: {slug}")
+                print(f"✅ {action} Page: {slug}")
                 IMPORT_LOGS["successful_pages"].append(slug)
             else:
                 print(f"❌ API Error ({slug}): {res.status_code} - {res.text}")
@@ -390,7 +405,7 @@ def print_completion_report():
     print("=" * 80)
     print(f"  • Successfully Uploaded Media Files : {len(IMPORT_LOGS['uploaded_media'])}")
     print(f"  • Failed Media Uploads             : {len(IMPORT_LOGS['failed_media'])}")
-    print(f"  • Successful Pages Imported        : {len(IMPORT_LOGS['successful_pages'])}")
+    print(f"  • Successful Pages Processed       : {len(IMPORT_LOGS['successful_pages'])}")
     print(f"  • Failed Pages (API Errors)         : {len(IMPORT_LOGS['failed_pages'])}")
     print(f"  • Unhandled/Unmapped Blocks        : {len(IMPORT_LOGS['unhandled_blocks'])}")
     print("=" * 80)
