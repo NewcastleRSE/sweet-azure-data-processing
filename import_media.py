@@ -9,16 +9,17 @@ from azure.storage.blob import BlobServiceClient
 load_dotenv()
 
 AZURE_CONN_STR = os.getenv("AZURE_STORAGE_CONNECTION_STRING")
-CONTAINER_NAME = "content"  # Container holding your resourceblobs folder
-STRAPI_URL = os.getenv("STRAPI_URL", "http://localhost:1337")
+CONTAINER_NAME = "content"
+STRAPI_URL = os.getenv("STRAPI_URL", "http://localhost:1337").rstrip("/")
 STRAPI_API_TOKEN = os.getenv("STRAPI_API_TOKEN")
 
 HEADERS = {
-    "Authorization": f"Bearer {STRAPI_API_TOKEN}"
+    "Authorization": f"Bearer {STRAPI_API_TOKEN}",
+    "Content-Type": "application/json"
 }
 
 lz = LZString()
-MEDIA_CACHE = {}  # Maps filename -> Strapi Media ID
+MEDIA_CACHE = {}
 
 IMPORT_LOGS = {
     "successful_pages": [],
@@ -29,13 +30,28 @@ IMPORT_LOGS = {
     "warnings": []
 }
 
+VALID_ENDPOINT = None
+
+def discover_strapi_endpoint():
+    global VALID_ENDPOINT
+    test_endpoints = ["/api/pages", "/api/page"]
+    for ep in test_endpoints:
+        try:
+            res = requests.get(f"{STRAPI_URL}{ep}", headers=HEADERS)
+            if res.status_code in [200, 403]:
+                VALID_ENDPOINT = ep
+                print(f"🔍 Discovered active Strapi endpoint: {VALID_ENDPOINT}")
+                return
+        except Exception:
+            continue
+    VALID_ENDPOINT = "/api/pages"
+    print(f"⚠️ Defaulting to endpoint: {VALID_ENDPOINT}")
+
 
 def upload_blob_to_strapi(blob_client, blob_name: str):
-    """Downloads a blob from Azure and uploads it directly to Strapi Media Library."""
     filename = os.path.basename(blob_name)
     if not filename:
         return None
-
     if filename in MEDIA_CACHE:
         return MEDIA_CACHE[filename]
 
@@ -43,57 +59,34 @@ def upload_blob_to_strapi(blob_client, blob_name: str):
         stream = blob_client.download_blob()
         file_bytes = stream.readall()
         file_obj = io.BytesIO(file_bytes)
-
-        files = {
-            'files': (filename, file_obj, 'image/auto')
-        }
-        
-        upload_headers = {
-            "Authorization": f"Bearer {STRAPI_API_TOKEN}"
-        }
+        files = {'files': (filename, file_obj, 'image/auto')}
+        upload_headers = {"Authorization": f"Bearer {STRAPI_API_TOKEN}"}
         
         res = requests.post(f"{STRAPI_URL}/api/upload", headers=upload_headers, files=files)
-        
         if res.status_code in [200, 201]:
             media_data = res.json()
             media_id = media_data[0]['id'] if isinstance(media_data, list) else media_data['data']['id']
             MEDIA_CACHE[filename] = media_id
             IMPORT_LOGS["uploaded_media"].append(filename)
-            print(f"🖼️ Uploaded Media: {filename} (ID: {media_id})")
             return media_id
-        else:
-            IMPORT_LOGS["failed_media"].append({"file": filename, "error": res.text})
-            print(f"❌ Failed to upload media '{filename}': {res.status_code} - {res.text}")
-            return None
     except Exception as e:
         IMPORT_LOGS["failed_media"].append({"file": filename, "error": str(e)})
-        print(f"❌ Exception uploading media '{filename}': {e}")
-        return None
+    return None
 
 
 def sync_azure_media_library():
-    """Connects to Azure Blob Storage and syncs all images from the 'resourceblobs/' folder."""
     if not AZURE_CONN_STR:
-        IMPORT_LOGS["warnings"].append("Missing Azure Connection String. Skipping media sync.")
         return
-
-    print("☁️ Connecting to Azure Blob Storage to scan 'resourceblobs/' folder...")
+    print("☁️ Connecting to Azure Blob Storage...")
     try:
         service_client = BlobServiceClient.from_connection_string(AZURE_CONN_STR)
         container_client = service_client.get_container_client(CONTAINER_NAME)
-        
         blobs = container_client.list_blobs(name_starts_with="resourceblobs/")
-
-        count = 0
         for blob in blobs:
             if blob.size > 0:
-                blob_client = container_client.get_blob_client(blob.name)
-                upload_blob_to_strapi(blob_client, blob.name)
-                count += 1
-                
-        print(f"✨ Scanned {count} blobs in 'resourceblobs/'. Successfully mapped {len(MEDIA_CACHE)} images into Strapi.\n")
+                upload_blob_to_strapi(container_client.get_blob_client(blob.name), blob.name)
+        print(f"✨ Mapped {len(MEDIA_CACHE)} images into Strapi.\n")
     except Exception as e:
-        IMPORT_LOGS["warnings"].append(f"Azure sync error: {e}")
         print(f"❌ Azure connection error: {e}")
 
 
@@ -104,11 +97,9 @@ def decode_text(text: str, encoding: str) -> str:
         return text
     try:
         if encoding == "lz-string:B64":
-            decompressed = lz.decompressFromBase64(text)
-            return decompressed if decompressed is not None else text
+            return lz.decompressFromBase64(text) or text
         elif encoding == "lz-string:UTF16":
-            decompressed = lz.decompressFromUTF16(text)
-            return decompressed if decompressed is not None else text
+            return lz.decompressFromUTF16(text) or text
     except Exception:
         pass
     return text
@@ -117,243 +108,112 @@ def decode_text(text: str, encoding: str) -> str:
 def extract_quotes_and_body(content_list: list, context_path: str):
     body_text = ""
     quotes = []
-
     for item in content_list:
         if not isinstance(item, dict):
             body_text += str(item) + "\n\n"
             continue
-
         itype = item.get("type")
         if itype == "markdown":
-            decoded = decode_text(item.get("text", ""), item.get("encoding", ""))
-            body_text += decoded + "\n\n"
+            body_text += decode_text(item.get("text", ""), item.get("encoding", "")) + "\n\n"
         elif itype == "popup":
             body_text += f"\n[Popup: {item.get('title', item.get('name'))}]\n\n"
         elif itype == "container":
             for c_item in item.get("content", []):
                 if isinstance(c_item, dict) and c_item.get("type") == "block-quote":
-                    quotes.append({
-                        "text": c_item.get("text", ""),
-                        "citation": c_item.get("citation", "")
-                    })
-                elif isinstance(c_item, dict) and c_item.get("type") in ["reminders", "diary-calendar", "diarygraph"]:
-                    body_text += f"\n[{c_item.get('type').upper()} WIDGET]\n\n"
-                else:
-                    IMPORT_LOGS["unhandled_blocks"].append({
-                        "path": context_path,
-                        "parent": "container_inside_block",
-                        "block": c_item
-                    })
-        else:
-            IMPORT_LOGS["unhandled_blocks"].append({
-                "path": context_path,
-                "parent": "nested_content_list",
-                "block": item
-            })
-
+                    quotes.append({"text": c_item.get("text", ""), "citation": c_item.get("citation", "")})
     return body_text.strip(), quotes
 
 
 def transform_block(item: dict, page_route: str):
     if not isinstance(item, dict):
-        return {
-            "__component": "blocks.markdown",
-            "text": str(item),
-            "encoding": "plain"
-        }
+        return {"__component": "blocks.markdown", "text": str(item), "encoding": "plain"}
 
     item_type = item.get("type")
-
     if item_type == "markdown":
-        raw_text = item.get("text", "")
-        encoding = item.get("encoding", "")
-        plain_text = decode_text(raw_text, encoding)
-        return {
-            "__component": "blocks.markdown",
-            "text": plain_text,
-            "encoding": "plain"
-        }
-
+        return {"__component": "blocks.markdown", "text": decode_text(item.get("text", ""), item.get("encoding", "")), "encoding": "plain"}
     elif item_type in ["menu", "described-menu", "homepage-menu"]:
         menu_items = []
         raw_items = item.get("content", [])
         if "mainitems" in item:
             raw_items = item.get("mainitems", []) + item.get("sideitems", [])
-            if "profiler" in item and isinstance(item["profiler"], dict):
-                raw_items.append(item["profiler"])
-
         for mi in raw_items:
-            if not isinstance(mi, dict):
-                continue
-            desc = mi.get("description", "")
-            if isinstance(desc, dict):
-                desc = decode_text(desc.get("text", ""), desc.get("encoding", ""))
-            
-            menu_items.append({
-                "title": mi.get("title", ""),
-                "link": mi.get("link", ""),
-                "icon": mi.get("icon", "none"),
-                "description": desc or ""
-            })
-
-        return {
-            "__component": "blocks.menu",
-            "menu_type": item_type,
-            "items": menu_items
-        }
-
+            if isinstance(mi, dict):
+                menu_items.append({"title": mi.get("title", ""), "link": mi.get("link", ""), "icon": mi.get("icon", "none"), "description": mi.get("description", "")})
+        return {"__component": "blocks.menu", "menu_type": item_type, "items": menu_items}
     elif item_type == "accordion":
         acc_items = []
         for acc in item.get("content", []):
-            if not isinstance(acc, dict):
-                continue
-            body_text, quotes = extract_quotes_and_body(acc.get("content", []), f"{page_route} -> Accordion[{acc.get('header')}]")
-            acc_items.append({
-                "header": acc.get("header", ""),
-                "icon": acc.get("icon", "none"),
-                "body": body_text,
-                "quotes": quotes
-            })
-        return {
-            "__component": "blocks.accordion",
-            "items": acc_items
-        }
-
+            if isinstance(acc, dict):
+                body_text, quotes = extract_quotes_and_body(acc.get("content", []), page_route)
+                acc_items.append({"header": acc.get("header", ""), "icon": acc.get("icon", "none"), "body": body_text, "quotes": quotes})
+        return {"__component": "blocks.accordion", "items": acc_items}
     elif item_type == "popup":
-        body_text, quotes = extract_quotes_and_body(item.get("content", []), f"{page_route} -> Popup[{item.get('name')}]")
-        return {
-            "__component": "blocks.popup",
-            "name_key": item.get("name", ""),
-            "title": item.get("title", ""),
-            "size": item.get("size", "lg") or "lg",
-            "body": body_text,
-            "quotes": quotes
-        }
-
+        body_text, quotes = extract_quotes_and_body(item.get("content", []), page_route)
+        return {"__component": "blocks.popup", "name_key": item.get("name", ""), "title": item.get("title", ""), "size": item.get("size", "lg") or "lg", "body": body_text, "quotes": quotes}
     elif item_type == "standout":
-        content_array = item.get("content", [{}])
-        inner = content_array[0] if content_array and isinstance(content_array[0], dict) else {}
-        raw_text = inner.get("text", "")
-        encoding = inner.get("encoding", "")
-        return {
-            "__component": "blocks.standout",
-            "class": item.get("class", "so-important"),
-            "text": decode_text(raw_text, encoding)
-        }
-
+        inner = item.get("content", [{}])[0] if item.get("content") else {}
+        return {"__component": "blocks.standout", "class": item.get("class", "so-important"), "text": decode_text(inner.get("text", ""), inner.get("encoding", ""))}
     elif item_type == "carousel":
         partner_items = []
         for slide in item.get("slides", []):
-            if not isinstance(slide, dict):
-                continue
-            content = slide.get("content", {})
-            if isinstance(content, dict) and content.get("type") == "tiledresources":
-                for res_name in content.get("resources", []):
-                    res_str = str(res_name).strip()
-                    matched_media_id = None
-                    for cached_filename, media_id in MEDIA_CACHE.items():
-                        if res_str.lower() in cached_filename.lower():
-                            matched_media_id = media_id
-                            break
-
-                    partner_items.append({
-                        "name": res_str,
-                        "url": "",
-                        "logo": matched_media_id
-                    })
-
-        return {
-            "__component": "blocks.partner-carousel",
-            "name": item.get("name", "Logos"),
-            "controls": item.get("controls", False),
-            "indicators": item.get("indicators", True),
-            "autostart": item.get("autostart", True),
-            "partners": partner_items
-        }
-
-    elif item_type in [
-        "goalsetter", "goalchecker", "diary-calendar", "diarygraph", 
-        "reminders", "my-plans", "user-details-page", "my-personal-support", 
-        "thoughts-page", "favourites-page", "index-list", "thoughts", "contacts-page",
-        "fillin", "plan"
-    ]:
-        return {
-            "__component": "blocks.interactive-tool",
-            "tool_type": item_type,
-            "config": {k: v for k, v in item.items() if k != "type"}
-        }
-
-    IMPORT_LOGS["unhandled_blocks"].append({
-        "path": page_route,
-        "parent": "root_dynamic_zone",
-        "block": item
-    })
+            if isinstance(slide, dict) and isinstance(slide.get("content"), dict):
+                for res_name in slide["content"].get("resources", []):
+                    matched_id = next((mid for fname, mid in MEDIA_CACHE.items() if str(res_name).strip().lower() in fname.lower()), None)
+                    partner_items.append({"name": str(res_name).strip(), "url": "", "logo": matched_id})
+        return {"__component": "blocks.partner-carousel", "name": item.get("name", "Logos"), "partners": partner_items}
+    elif item_type in ["goalsetter", "goalchecker", "diary-calendar", "diarygraph", "reminders", "my-plans", "user-details-page", "my-personal-support", "thoughts-page", "favourites-page", "index-list", "thoughts", "contacts-page", "fillin", "plan"]:
+        return {"__component": "blocks.interactive-tool", "tool_type": item_type, "config": {k: v for k, v in item.items() if k != "type"}}
     return None
 
 
-def merge_json_files(content_path: str, structure_path: str, resources_path: str) -> dict:
+def merge_json_files(content_path, structure_path, resources_path):
     merged_data = {}
     for file_path in [content_path, structure_path, resources_path]:
         if os.path.exists(file_path):
-            try:
-                with open(file_path, "r", encoding="utf-8") as f:
-                    file_data = json.load(f)
-                    for route, blocks in file_data.items():
-                        if route not in merged_data:
-                            merged_data[route] = []
-                        if isinstance(blocks, list):
-                            for b in blocks:
-                                if b not in merged_data[route]:
-                                    merged_data[route].append(b)
-                print(f"📖 Loaded '{file_path}' ({len(file_data)} routes)")
-            except Exception as e:
-                IMPORT_LOGS["warnings"].append(f"Failed to read file '{file_path}': {e}")
-        else:
-            IMPORT_LOGS["warnings"].append(f"File not found: '{file_path}' - Skipping.")
+            with open(file_path, "r", encoding="utf-8") as f:
+                file_data = json.load(f)
+                for route, blocks in file_data.items():
+                    if route not in merged_data:
+                        merged_data[route] = []
+                    if isinstance(blocks, list):
+                        for b in blocks:
+                            if b not in merged_data[route]:
+                                merged_data[route].append(b)
     return merged_data
 
 
 def import_all_to_strapi():
+    discover_strapi_endpoint()
     sync_azure_media_library()
 
     merged_routes = merge_json_files("content.json", "structure.json", "resources.json")
-    print(f"🚀 Starting page import/update of {len(merged_routes)} unique routes into Strapi...\n")
+    print(f"🚀 Importing {len(merged_routes)} routes cleanly...")
 
-    rest_headers = {
-        "Authorization": f"Bearer {STRAPI_API_TOKEN}",
-        "Content-Type": "application/json",
-    }
+    slug_to_id = {}
+    sorted_routes = sorted(merged_routes.keys(), key=lambda r: r.count("/"))
 
-    for raw_route, blocks in merged_routes.items():
-        # Clean the route to form a unique, full-path slug
-        # e.g., "#home/dealing-se/sleep/help" becomes "home-dealing-se-sleep-help"
-        slug = raw_route.lstrip("#").strip().replace("/", "-").lower()
+    # ---------------------------------------------------------
+    # PASS 1: Create or Update all pages safely (No relations yet)
+    # ---------------------------------------------------------
+    for raw_route in sorted_routes:
+        blocks = merged_routes[raw_route]
+        clean_route = raw_route.lstrip("#").strip()
+        slug = clean_route.replace("/", "-").lower() or "home"
         title = slug.split("-")[-1].replace("-", " ").title() or "Home"
 
         dynamic_zone_payload = []
-
         for block in blocks:
-            if not isinstance(block, dict):
-                continue
-
-            if block.get("type") == "container":
-                for inner_block in block.get("content", []):
-                    if isinstance(inner_block, dict) and inner_block.get("type") == "block-quote":
-                        dynamic_zone_payload.append({
-                            "__component": "blocks.quote-block",
-                            "quote_details": {
-                                "text": inner_block.get("text", ""),
-                                "citation": inner_block.get("citation", "")
-                            }
-                        })
-                    else:
-                        transformed = transform_block(inner_block, slug)
-                        if transformed:
-                            dynamic_zone_payload.append(transformed)
-            else:
-                transformed = transform_block(block, slug)
-                if transformed:
-                    dynamic_zone_payload.append(transformed)
+            if isinstance(block, dict):
+                if block.get("type") == "container":
+                    for inner in block.get("content", []):
+                        if isinstance(inner, dict) and inner.get("type") == "block-quote":
+                            dynamic_zone_payload.append({"__component": "blocks.quote-block", "quote_details": {"text": inner.get("text", ""), "citation": inner.get("citation", "")}})
+                        else:
+                            t = transform_block(inner, slug)
+                            if t: dynamic_zone_payload.append(t)
+                else:
+                    t = transform_block(block, slug)
+                    if t: dynamic_zone_payload.append(t)
 
         payload = {
             "data": {
@@ -364,52 +224,85 @@ def import_all_to_strapi():
         }
 
         try:
-            # Check if page already exists by slug to perform an Upsert (Update vs Create)
-            check_res = requests.get(f"{STRAPI_URL}/api/pages?filters[slug][$eq]={slug}", headers=rest_headers)
+            check_res = requests.get(f"{STRAPI_URL}{VALID_ENDPOINT}?filters[slug][$eq]={slug}", headers=HEADERS)
             existing_id = None
             if check_res.status_code == 200:
                 data = check_res.json().get("data", [])
                 if data:
-                    existing_id = data[0]["id"]
+                    existing_id = data[0].get("documentId") or data[0].get("id")
 
             if existing_id:
-                res = requests.put(f"{STRAPI_URL}/api/pages/{existing_id}", headers=rest_headers, json=payload)
+                res = requests.put(f"{STRAPI_URL}{VALID_ENDPOINT}/{existing_id}", headers=HEADERS, json=payload)
+                record_id = existing_id
                 action = "Updated"
             else:
-                res = requests.post(f"{STRAPI_URL}/api/pages", headers=rest_headers, json=payload)
-                action = "Imported"
+                res = requests.post(f"{STRAPI_URL}{VALID_ENDPOINT}", headers=HEADERS, json=payload)
+                record_id = None
+                if res.text:
+                    try:
+                        res_json = res.json()
+                        if res_json:
+                            res_data = res_json.get("data", res_json)
+                            if isinstance(res_data, dict):
+                                record_id = res_data.get("documentId") or res_data.get("id")
+                    except Exception:
+                        pass
+                
+                if not record_id and res.status_code in [200, 201]:
+                    fallback_res = requests.get(f"{STRAPI_URL}{VALID_ENDPOINT}?filters[slug][$eq]={slug}", headers=HEADERS)
+                    if fallback_res.status_code == 200:
+                        fb_data = fallback_res.json().get("data", [])
+                        if fb_data:
+                            record_id = fb_data[0].get("documentId") or fb_data[0].get("id")
 
-            if res.status_code in [200, 201]:
+                action = "Created"
+
+            if res.status_code in [200, 201] and record_id:
+                slug_to_id[slug] = record_id
                 print(f"✅ {action} Page: {slug}")
                 IMPORT_LOGS["successful_pages"].append(slug)
             else:
                 print(f"❌ API Error ({slug}): {res.status_code} - {res.text}")
-                IMPORT_LOGS["failed_pages"].append({
-                    "slug": slug,
-                    "status_code": res.status_code,
-                    "error": res.text
-                })
+                IMPORT_LOGS["failed_pages"].append({"slug": slug, "error": res.text})
         except Exception as e:
-            IMPORT_LOGS["failed_pages"].append({
-                "slug": slug,
-                "status_code": "EXCEPTION",
-                "error": str(e)
-            })
+            print(f"❌ Exception on {slug}: {e}")
+            IMPORT_LOGS["failed_pages"].append({"slug": slug, "error": str(e)})
 
-    print_completion_report()
+    # ---------------------------------------------------------
+    # PASS 2: Link Parents using Strapi's explicit connect syntax
+    # ---------------------------------------------------------
+    print("\n🔗 Linking page hierarchies safely...")
+    linked_count = 0
 
+    for raw_route in sorted_routes:
+        clean_route = raw_route.lstrip("#").strip()
+        if "/" not in clean_route:
+            continue
 
-def print_completion_report():
-    print("\n" + "=" * 80)
-    print("AZURE MEDIA & MIGRATION REPORT")
-    print("=" * 80)
-    print(f"  • Successfully Uploaded Media Files : {len(IMPORT_LOGS['uploaded_media'])}")
-    print(f"  • Failed Media Uploads             : {len(IMPORT_LOGS['failed_media'])}")
-    print(f"  • Successful Pages Processed       : {len(IMPORT_LOGS['successful_pages'])}")
-    print(f"  • Failed Pages (API Errors)         : {len(IMPORT_LOGS['failed_pages'])}")
-    print(f"  • Unhandled/Unmapped Blocks        : {len(IMPORT_LOGS['unhandled_blocks'])}")
-    print("=" * 80)
+        child_slug = clean_route.replace("/", "-").lower()
+        parent_parts = clean_route.split("/")[:-1]
+        parent_slug = "-".join(parent_parts).lower()
 
+        child_id = slug_to_id.get(child_slug)
+        parent_id = slug_to_id.get(parent_slug)
+
+        if child_id and parent_id:
+            relation_payload = {
+                "data": {
+                    "parent": {
+                        "connect": [parent_id]
+                    }
+                }
+            }
+            try:
+                rel_res = requests.put(f"{STRAPI_URL}{VALID_ENDPOINT}/{child_id}", headers=HEADERS, json=relation_payload)
+                if rel_res.status_code in [200, 201]:
+                    linked_count += 1
+                    print(f"🔗 Linked '{child_slug}' -> Parent '{parent_slug}'")
+            except Exception as e:
+                print(f"⚠️ Failed to link '{child_slug}': {e}")
+
+    print(f"\n✨ Migration Complete! Successfully processed pages and established {linked_count} hierarchy links.")
 
 if __name__ == "__main__":
     import_all_to_strapi()

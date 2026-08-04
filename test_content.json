@@ -1,0 +1,71 @@
+{
+  "#home": [
+    {
+      "type": "container",
+      "content": [
+        {
+          "mainitems": [
+            {
+              "description": "Read why it's important to take hormone therapy every day.",
+              "icon": "pills",
+              "link": "#home/diary",
+              "title": "My Hormone Therapy Diary",
+              "type": "menu-item"
+            },
+            {
+              "description": "See all the goals and plans you've made.",
+              "icon": "notepad",
+              "link": "#home/goals-and-plans",
+              "title": "My Goals and Plans",
+              "type": "menu-item"
+            }
+          ],
+          "type": "homepage-menu"
+        }
+      ]
+    }
+  ],
+  "#home/diary": [
+    {
+      "type": "markdown",
+      "text": "Welcome to your active diary tracking space."
+    }
+  ],
+  "#home/goals-and-plans": [
+    {
+      "type": "described-menu",
+      "content": [
+        {
+          "type": "described-menu-item",
+          "title": "My Goals",
+          "link": "#home/goals-and-plans/goals",
+          "description": {
+            "type": "markdown",
+            "text": "Define what success looks like."
+          }
+        },
+        {
+          "type": "described-menu-item",
+          "title": "My Plan",
+          "link": "#home/goals-and-plans/plans",
+          "description": {
+            "type": "markdown",
+            "text": "Manage your structured plan."
+          }
+        }
+      ]
+    }
+  ],
+  "#home/goals-and-plans/goals": [
+    {
+      "type": "markdown",
+      "text": "Here you can set and adjust your personal targets."
+    }
+  ],
+  "#home/goals-and-plans/plans": [
+    {
+      "type": "markdown",
+      "text": "Here is your structured step-by-step plan."
+    }
+  ]
+}
