@@ -23,7 +23,7 @@ HEADERS = {
 }
 
 def clean_payload(data):
-    """Removes keys with None, empty string, or whitespace-only values to avoid Strapi validation errors."""
+    """Removes keys with None, empty string, or whitespace-only values, but preserves 0 and False."""
     if isinstance(data, dict):
         return {
             k: clean_payload(v) for k, v in data.items() 
@@ -197,7 +197,7 @@ def process_user_userdata(sweet_id, container_client):
                             t_time = taken_data.get("time")
                             if t_date and t_time:
                                 formatted_t_time = format_time_to_hh_mm_ss_sss(t_time)
-                                datetime_str = f"{t_date}T{formatted_t_time}Z"
+                                datetime_str = f"{t_date}T{formatted_t_time}"
 
                                 drug_payload = {
                                     "taken": datetime_str,
@@ -217,13 +217,41 @@ def process_user_userdata(sweet_id, container_client):
 
             # --- META ---
             elif file_name == "meta":
-                if isinstance(data, dict) and "21dayoption" in data:
-                    meta_payload = {
-                        "twenty_one_day_option": data["21dayoption"],
-                        "user": user_db_id
-                    }
-                    print(f"   ⚙️ Importing meta (21dayoption)...")
-                    post_to_strapi("metas", meta_payload)
+                if isinstance(data, dict):
+                    print(f"   ⚙️ Importing meta entries...")
+                    for key, value in data.items():
+                        if key == "21dayoption":
+                            meta_payload = {
+                                "twenty_one_day_option": value,
+                                "user": user_db_id
+                            }
+                            post_to_strapi("metas", meta_payload)
+                        elif isinstance(value, dict):
+                            outer_key = key  # e.g., 'goalmsg'
+                            
+                            # Check if value contains 'y', 'p', 'n' directly (No subkey present)
+                            if any(k in value for k in ["y", "p", "n"]):
+                                meta_payload = {
+                                    "type": outer_key,
+                                    "y": value.get("y", 0),
+                                    "p": value.get("p", 0),
+                                    "n": value.get("n", 0),
+                                    "user": user_db_id
+                                }
+                                post_to_strapi("metas", meta_payload)
+                            else:
+                                # Has subkeys (e.g., 'activity', 'eating')
+                                for sub_key, sub_val in value.items():
+                                    if isinstance(sub_val, dict):
+                                        meta_payload = {
+                                            "type": outer_key,
+                                            "subtype": sub_key,
+                                            "y": sub_val.get("y", 0),
+                                            "p": sub_val.get("p", 0),
+                                            "n": sub_val.get("n", 0),
+                                            "user": user_db_id
+                                        }
+                                        post_to_strapi("metas", meta_payload)
                 else:
                     print(f"   ⚠️ Unhandled structure in 'meta': {data}")
 
