@@ -1,0 +1,109 @@
+[
+  {
+    "sweet_id": "admin",
+    "email": "jim.mcgrath@newcastle.ac.uk",
+    "step": "user_creation",
+    "error": "User Creation Failed (Status 400): {\"data\":null,\"error\":{\"status\":400,\"name\":\"ApplicationError\",\"message\":\"Email already taken\",\"details\":{}}}"
+  },
+  {
+    "sweet_id": "CT5192",
+    "email": "breastcancer@now",
+    "step": "user_creation",
+    "error": "User Creation Failed (Status 400): {\"data\":null,\"error\":{\"status\":400,\"name\":\"ValidationError\",\"message\":\"email must be a valid email\",\"details\":{\"errors\":[{\"path\":[\"email\"],\"message\":\"email must be a valid email\",\"name\":\"ValidationError\",\"value\":\"breastcancer@now\"}]}}}"
+  },
+  {
+    "sweet_id": "CT9191",
+    "email": "sweet@imperial",
+    "step": "user_creation",
+    "error": "User Creation Failed (Status 400): {\"data\":null,\"error\":{\"status\":400,\"name\":\"ValidationError\",\"message\":\"email must be a valid email\",\"details\":{\"errors\":[{\"path\":[\"email\"],\"message\":\"email must be a valid email\",\"name\":\"ValidationError\",\"value\":\"sweet@imperial\"}]}}}"
+  },
+  {
+    "sweet_id": "6547",
+    "step": "processing_exception",
+    "error": "Decrypted user object is missing an email address."
+  },
+  {
+    "sweet_id": "CT6349",
+    "email": "gp@sweet",
+    "step": "user_creation",
+    "error": "User Creation Failed (Status 400): {\"data\":null,\"error\":{\"status\":400,\"name\":\"ValidationError\",\"message\":\"email must be a valid email\",\"details\":{\"errors\":[{\"path\":[\"email\"],\"message\":\"email must be a valid email\",\"name\":\"ValidationError\",\"value\":\"gp@sweet\"}]}}}"
+  },
+  {
+    "sweet_id": "CT1126",
+    "email": "nurses@oxford",
+    "step": "user_creation",
+    "error": "User Creation Failed (Status 400): {\"data\":null,\"error\":{\"status\":400,\"name\":\"ValidationError\",\"message\":\"email must be a valid email\",\"details\":{\"errors\":[{\"path\":[\"email\"],\"message\":\"email must be a valid email\",\"name\":\"ValidationError\",\"value\":\"nurses@oxford\"}]}}}"
+  },
+  {
+    "sweet_id": "RT6579",
+    "email": "test@UCL.ac.uk",
+    "step": "user_creation",
+    "error": "User Creation Failed (Status 400): {\"data\":null,\"error\":{\"status\":400,\"name\":\"ApplicationError\",\"message\":\"password must be at least 6 characters\",\"details\":{}}}"
+  },
+  {
+    "sweet_id": "F1116",
+    "email": "tel.jac03@yahoo.co.uk",
+    "step": "user_creation",
+    "error": "User Creation Failed (Status 400): {\"data\":null,\"error\":{\"status\":400,\"name\":\"ApplicationError\",\"message\":\"Email already taken\",\"details\":{}}}"
+  },
+  {
+    "sweet_id": "F1428",
+    "email": "chrisyoung07@btinternet.com",
+    "step": "user_creation",
+    "error": "User Creation Failed (Status 400): {\"data\":null,\"error\":{\"status\":400,\"name\":\"ApplicationError\",\"message\":\"Email already taken\",\"details\":{}}}"
+  },
+  {
+    "sweet_id": "F4524",
+    "email": "jul14w3@outlook.com",
+    "step": "user_creation",
+    "error": "User Creation Failed (Status 400): {\"data\":null,\"error\":{\"status\":400,\"name\":\"ApplicationError\",\"message\":\"Email already taken\",\"details\":{}}}"
+  },
+  {
+    "sweet_id": "T4443",
+    "email": "jbloggs@noone.co.uk",
+    "step": "user_creation",
+    "error": "User Creation Failed (Status 400): {\"data\":null,\"error\":{\"status\":400,\"name\":\"ApplicationError\",\"message\":\"password must be at least 6 characters\",\"details\":{}}}"
+  },
+  {
+    "sweet_id": "A0002",
+    "email": "test@test.co.uk",
+    "step": "user_creation",
+    "error": "User Creation Failed (Status 400): {\"data\":null,\"error\":{\"status\":400,\"name\":\"ApplicationError\",\"message\":\"password must be at least 6 characters\",\"details\":{}}}"
+  },
+  {
+    "sweet_id": "B0001",
+    "email": "test@test",
+    "step": "user_creation",
+    "error": "User Creation Failed (Status 400): {\"data\":null,\"error\":{\"status\":400,\"name\":\"ValidationError\",\"message\":\"email must be a valid email\",\"details\":{\"errors\":[{\"path\":[\"email\"],\"message\":\"email must be a valid email\",\"name\":\"ValidationError\",\"value\":\"test@test\"}]}}}"
+  },
+  {
+    "sweet_id": "B0044",
+    "email": "jgreen_100356@hotmail.co.uk",
+    "step": "user_creation",
+    "error": "User Creation Failed (Status 400): {\"data\":null,\"error\":{\"status\":400,\"name\":\"ApplicationError\",\"message\":\"password must be at least 6 characters\",\"details\":{}}}"
+  },
+  {
+    "sweet_id": "B0078",
+    "email": "maggiemox@hotmail.com",
+    "step": "user_creation",
+    "error": "User Creation Failed (Status 400): {\"data\":null,\"error\":{\"status\":400,\"name\":\"ValidationError\",\"message\":\"2 errors occurred\",\"details\":{\"errors\":[{\"path\":[\"password\"],\"message\":\"password must be at least 1 characters\",\"name\":\"ValidationError\",\"value\":\"\"},{\"path\":[\"password\"],\"message\":\"password is a required field\",\"name\":\"ValidationError\",\"value\":\"\"}]}}}"
+  },
+  {
+    "sweet_id": "C0030",
+    "email": "alysharp@sky",
+    "step": "user_creation",
+    "error": "User Creation Failed (Status 400): {\"data\":null,\"error\":{\"status\":400,\"name\":\"ValidationError\",\"message\":\"email must be a valid email\",\"details\":{\"errors\":[{\"path\":[\"email\"],\"message\":\"email must be a valid email\",\"name\":\"ValidationError\",\"value\":\"alysharp@sky\"}]}}}"
+  },
+  {
+    "sweet_id": "C0178",
+    "email": "marionramsay@hotmail.co.uk",
+    "step": "user_creation",
+    "error": "User Creation Failed (Status 400): {\"data\":null,\"error\":{\"status\":400,\"name\":\"ApplicationError\",\"message\":\"Email already taken\",\"details\":{}}}"
+  },
+  {
+    "sweet_id": "C0133",
+    "email": "terriebrittain@btinternet.com",
+    "step": "user_creation",
+    "error": "User Creation Failed (Status 400): {\"data\":null,\"error\":{\"status\":400,\"name\":\"ValidationError\",\"message\":\"2 errors occurred\",\"details\":{\"errors\":[{\"path\":[\"password\"],\"message\":\"password must be at least 1 characters\",\"name\":\"ValidationError\",\"value\":\"\"},{\"path\":[\"password\"],\"message\":\"password is a required field\",\"name\":\"ValidationError\",\"value\":\"\"}]}}}"
+  }
+]
