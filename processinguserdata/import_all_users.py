@@ -146,7 +146,20 @@ def import_all_users():
                 )
 
                 if create_res.status_code not in [200, 201]:
-                    error_msg = f"User Creation Failed (Status {create_res.status_code}): {create_res.text}"
+
+                    # if the error is password not being 6 characters, make password 'password' and retry, ask users to reset password. Use in staging only.
+                    if "password must be at least 6 characters" in json.loads(create_res.text).get("error", {}).get("message", ""):
+                        print(f"   ⚠️ Password too short, retrying with default password...")
+                        user_payload["password"] = "password"
+                        create_res = requests.post(
+                            f"{STRAPI_URL}/api/users",
+                            headers=HEADERS,
+                            json=user_payload
+                        )
+                        continue
+
+
+                    error_msg = f"User Creation Failed (Status {create_res.status_code}): {create_res.text}, Payload: {json.dumps(user_payload)}"
                     print(f"   ❌ {error_msg}")
                     error_log.append({
                         "sweet_id": registration_code,

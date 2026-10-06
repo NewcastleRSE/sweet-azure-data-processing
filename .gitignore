@@ -8,6 +8,12 @@ resources.json
 structure.json
 content.json
 
+**/data/**
+
+
+import_errors.json
+import_user_content_errors.json
+
 # Python virtual environments
 .venv/
 venv/

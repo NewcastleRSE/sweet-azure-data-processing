@@ -3,7 +3,6 @@ import json
 import base64
 import urllib.parse
 from azure.storage.blob import BlobServiceClient
-from cryptography.fernet import Fernet
 from dotenv import load_dotenv
 import requests
 
@@ -12,8 +11,6 @@ load_dotenv()
 # Configuration
 AZURE_CONNECTION_STRING = os.getenv("AZURE_STORAGE_CONNECTION_STRING")
 CONTAINER_NAME = "users"
-BLOB_NAME = "users.json"
-FERNET_SECRET = os.getenv("FERNET_SECRET")
 STRAPI_URL = os.getenv("STRAPI_URL", "http://localhost:1337").rstrip("/")
 STRAPI_API_TOKEN = os.getenv("STRAPI_API_TOKEN")
 
@@ -22,6 +19,8 @@ HEADERS = {
     "Content-Type": "application/json"
 }
 
+# Global error log tracker & Concern Specific cache
+error_log = []
 CONCERN_SPECIFIC_CACHE = {}
 
 def clean_payload(data):
@@ -53,7 +52,7 @@ def format_time_to_hh_mm_ss_sss(time_str):
         pass
     return time_str
 
-def get_or_create_concern_specific(concern_text):
+def get_or_create_concern_specific(concern_text, sweet_id):
     """Finds or creates a concernSpecific entry and returns its documentId or id for relation linking."""
     if not concern_text:
         return None
@@ -87,8 +86,22 @@ def get_or_create_concern_specific(concern_text):
             if entry_identifier:
                 CONCERN_SPECIFIC_CACHE[concern_text] = entry_identifier
                 return entry_identifier
+        else:
+            error_log.append({
+                "sweet_id": sweet_id,
+                "endpoint": "concern-specifics",
+                "status_code": create_res.status_code,
+                "response": create_res.text,
+                "payload": {"concern": concern_text}
+            })
     except Exception as e:
-        print(f"   ⚠️ Error handling concern-specific '{concern_text}': {e}")
+        error_log.append({
+            "sweet_id": sweet_id,
+            "endpoint": "concern-specifics",
+            "status_code": None,
+            "response": str(e),
+            "payload": {"concern": concern_text}
+        })
     
     return None
 
@@ -103,17 +116,33 @@ def get_strapi_user_by_sweet_id(sweet_id):
         print(f"⚠️ Error querying Strapi for SweetID {sweet_id}: {e}")
     return None, None
 
-def update_user_init_date(user_db_id, init_date):
+def update_user_init_date(user_db_id, init_date, sweet_id):
     try:
         res = requests.put(f"{STRAPI_URL}/api/users/{user_db_id}", headers=HEADERS, json={"init": init_date})
         if res.status_code == 200:
             print(f"   ✨ Successfully updated user init date to: {init_date}")
         else:
-            print(f"   ⚠️ Failed to update user init date (Status {res.status_code}): {res.text}")
+            err_msg = f"Failed to update user init date: {res.text}"
+            print(f"   ⚠️ {err_msg}")
+            error_log.append({
+                "sweet_id": sweet_id,
+                "endpoint": f"users/{user_db_id}",
+                "status_code": res.status_code,
+                "response": res.text,
+                "payload": {"init": init_date}
+            })
     except Exception as e:
-        print(f"   ❌ Exception updating user init: {e}")
+        err_msg = f"Exception updating user init: {str(e)}"
+        print(f"   ❌ {err_msg}")
+        error_log.append({
+            "sweet_id": sweet_id,
+            "endpoint": f"users/{user_db_id}",
+            "status_code": None,
+            "response": err_msg,
+            "payload": {"init": init_date}
+        })
 
-def post_to_strapi(endpoint, payload):
+def post_to_strapi(endpoint, payload, sweet_id):
     try:
         cleaned_data = clean_payload(payload)
         full_payload = {"data": cleaned_data}
@@ -121,12 +150,141 @@ def post_to_strapi(endpoint, payload):
         if res.status_code in [200, 201]:
             return True
         else:
-            print(f"   ❌ [Error {res.status_code}] Failed posting to '{endpoint}': {res.text}")
-            print(f"      📦 [Offending Payload]: {json.dumps(full_payload, indent=2)}")
+            err_msg = f"[Error {res.status_code}] {res.text}"
+            print(f"   ❌ Failed posting to '{endpoint}': {err_msg}")
+            error_log.append({
+                "sweet_id": sweet_id,
+                "endpoint": endpoint,
+                "status_code": res.status_code,
+                "response": res.text,
+                "payload": full_payload
+            })
             return False
     except Exception as e:
-        print(f"   ❌ Exception posting to '{endpoint}': {e}")
+        err_msg = f"Exception: {str(e)}"
+        print(f"   ❌ Exception posting to '{endpoint}': {err_msg}")
+        error_log.append({
+            "sweet_id": sweet_id,
+            "endpoint": endpoint,
+            "status_code": None,
+            "response": err_msg,
+            "payload": payload
+        })
         return False
+
+def put_to_strapi(endpoint, entry_id, payload, sweet_id):
+    try:
+        cleaned_data = clean_payload(payload)
+        full_payload = {"data": cleaned_data}
+        res = requests.put(f"{STRAPI_URL}/api/{endpoint}/{entry_id}", headers=HEADERS, json=full_payload)
+        if res.status_code == 200:
+            return True
+        else:
+            err_msg = f"[Error {res.status_code}] {res.text}"
+            print(f"   ❌ Failed updating '{endpoint}/{entry_id}': {err_msg}")
+            error_log.append({
+                "sweet_id": sweet_id,
+                "endpoint": f"{endpoint}/{entry_id}",
+                "status_code": res.status_code,
+                "response": res.text,
+                "payload": full_payload
+            })
+            return False
+    except Exception as e:
+        err_msg = f"Exception: {str(e)}"
+        print(f"   ❌ Exception updating '{endpoint}/{entry_id}': {err_msg}")
+        error_log.append({
+            "sweet_id": sweet_id,
+            "endpoint": f"{endpoint}/{entry_id}",
+            "status_code": None,
+            "response": err_msg,
+            "payload": payload
+        })
+        return False
+
+def build_query_string(filters):
+    """Flattens a nested filters dict/list into Strapi's bracket-notation query params."""
+    def _flatten(obj, prefix):
+        items = []
+        if isinstance(obj, dict):
+            for k, v in obj.items():
+                items.extend(_flatten(v, f"{prefix}[{k}]" if prefix else k))
+        elif isinstance(obj, list):
+            for i, v in enumerate(obj):
+                items.extend(_flatten(v, f"{prefix}[{i}]"))
+        else:
+            items.append((prefix, obj))
+        return items
+    return _flatten({"filters": filters}, "")
+
+def build_match(**fields):
+    """Builds $eq filters from the given fields, skipping any that are blank."""
+    match = {}
+    for key, value in fields.items():
+        if value is None or (isinstance(value, str) and not value.strip()):
+            continue
+        match[key] = {"$eq": value}
+    return match
+
+def find_existing_entries(endpoint, user_db_id, match_filters, sweet_id):
+    filters = {"user": {"$eq": user_db_id}}
+    filters.update(match_filters)
+    params = build_query_string(filters) + [("pagination[pageSize]", 100)]
+    try:
+        res = requests.get(f"{STRAPI_URL}/api/{endpoint}", headers=HEADERS, params=params)
+        if res.status_code == 200:
+            return res.json().get("data", [])
+        error_log.append({
+            "sweet_id": sweet_id,
+            "endpoint": endpoint,
+            "status_code": res.status_code,
+            "response": res.text,
+            "payload": {"filters": match_filters}
+        })
+    except Exception as e:
+        error_log.append({
+            "sweet_id": sweet_id,
+            "endpoint": endpoint,
+            "status_code": None,
+            "response": str(e),
+            "payload": {"filters": match_filters}
+        })
+    return []
+
+# Fields that should never trigger an update just because they exist on the fetched entry
+IGNORED_COMPARISON_KEYS = {"id", "documentId", "createdAt", "updatedAt", "publishedAt", "user", "locale"}
+
+def entries_differ(existing, new_payload):
+    for key, value in new_payload.items():
+        if key in IGNORED_COMPARISON_KEYS:
+            continue
+        # Relation payloads (e.g. {"connect": [...]}) aren't returned unpopulated, so skip comparing them
+        if isinstance(value, dict):
+            continue
+        if existing.get(key) != value:
+            return True
+    return False
+
+def upsert_to_strapi(endpoint, payload, sweet_id, match_filters):
+    """Creates a new entry if none matches match_filters, otherwise updates it only if changed."""
+    user_db_id = payload.get("user")
+    if not match_filters:
+        print(f"   ℹ️ No natural key available for '{endpoint}', creating without duplicate check.")
+        return post_to_strapi(endpoint, payload, sweet_id)
+
+    existing_entries = find_existing_entries(endpoint, user_db_id, match_filters, sweet_id)
+    if len(existing_entries) > 1:
+        print(f"   ⚠️ Found {len(existing_entries)} existing '{endpoint}' entries matching {match_filters} (likely duplicates from a previous run) — only the most recent will be updated.")
+
+    if existing_entries:
+        target = existing_entries[-1]
+        entry_id = target.get("documentId") or target.get("id")
+        cleaned = clean_payload(payload)
+        if entries_differ(target, cleaned):
+            return put_to_strapi(endpoint, entry_id, payload, sweet_id)
+        return True
+
+    return post_to_strapi(endpoint, payload, sweet_id)
 
 def process_user_userdata(sweet_id, container_client):
     print(f"\n========================================")
@@ -135,7 +293,14 @@ def process_user_userdata(sweet_id, container_client):
 
     user_db_id, user_doc_id = get_strapi_user_by_sweet_id(sweet_id)
     if not user_db_id:
-        print(f"❌ User with SweetID '{sweet_id}' was not found in Strapi. Please run user import first.")
+        print(f"❌ User with SweetID '{sweet_id}' was not found in Strapi. Skipping userdata.")
+        error_log.append({
+            "sweet_id": sweet_id,
+            "endpoint": "system",
+            "status_code": 404,
+            "response": "User not found in Strapi database",
+            "payload": None
+        })
         return
 
     print(f"✅ Found Strapi User ID: {user_db_id} (DocID: {user_doc_id})")
@@ -159,13 +324,20 @@ def process_user_userdata(sweet_id, container_client):
             if file_name == "_init":
                 init_date = content.strip()
                 print(f"   ⏳ Found init date: {init_date}")
-                update_user_init_date(user_db_id, init_date)
+                update_user_init_date(user_db_id, init_date, sweet_id)
                 continue
 
             try:
                 data = json.loads(content)
             except json.JSONDecodeError as jde:
                 print(f"   ❌ JSON Decode Error in '{file_name}': {jde}")
+                error_log.append({
+                    "sweet_id": sweet_id,
+                    "endpoint": file_name,
+                    "status_code": None,
+                    "response": f"JSON Decode Error: {str(jde)}",
+                    "payload": content[:500]
+                })
                 continue
 
             if file_name == "contacts":
@@ -173,7 +345,8 @@ def process_user_userdata(sweet_id, container_client):
                     print(f"   📋 Importing {len(data)} contacts...")
                     for contact in data:
                         contact["user"] = user_db_id
-                        post_to_strapi("contacts", contact)
+                        match = build_match(type=contact.get("type"), name=contact.get("name"))
+                        upsert_to_strapi("contacts", contact, sweet_id, match)
 
             elif file_name == "diary":
                 if isinstance(data, dict):
@@ -185,9 +358,10 @@ def process_user_userdata(sweet_id, container_client):
                         taken_data = day_content.get("taken")
                         updated_data = day_content.get("updated")
 
-                        # Adherence
+                        # Adherence (one entry per date)
                         if "adherence" in day_content:
-                            post_to_strapi("adherences", {"date": date_key, "adherence": day_content["adherence"], "user": user_db_id}, sweet_id)
+                            adherence_payload = {"date": date_key, "adherence": day_content["adherence"], "user": user_db_id}
+                            upsert_to_strapi("adherences", adherence_payload, sweet_id, build_match(date=date_key))
 
                         # Side Effects
                         if "sideeffects" in day_content and isinstance(day_content["sideeffects"], list):
@@ -196,7 +370,8 @@ def process_user_userdata(sweet_id, container_client):
                                     se_payload = se_item.copy()
                                     se_payload["date"] = date_key
                                     se_payload["user"] = user_db_id
-                                    post_to_strapi("side-effects", se_payload, sweet_id)
+                                    match = build_match(date=date_key, type=se_item.get("type"))
+                                    upsert_to_strapi("side-effects", se_payload, sweet_id, match)
 
                         # Notes (and pop 'taken' or 'updated' if nested inside notes)
                         if "notes" in day_content and isinstance(day_content["notes"], dict):
@@ -209,45 +384,54 @@ def process_user_userdata(sweet_id, container_client):
                             note_payload = note_obj.copy()
                             note_payload["date"] = date_key
                             note_payload["user"] = user_db_id
-                            post_to_strapi("notes", note_payload, sweet_id)
+                            upsert_to_strapi("notes", note_payload, sweet_id, build_match(date=date_key))
 
-                        # Process 'taken' into the 'drugs' table
+                        # Merge 'taken'/'updated' into a single 'drugs' record for this date
+                        drug_payload = {"user": user_db_id}
                         if isinstance(taken_data, dict):
                             t_date = taken_data.get("date") or date_key
                             t_time = taken_data.get("time")
                             if t_date and t_time:
-                                datetime_str = f"{t_date}T{format_time_to_hh_mm_ss_sss(t_time)}"
-                                post_to_strapi("drugs", {"taken": datetime_str, "user": user_db_id}, sweet_id)
+                                drug_payload["taken"] = f"{t_date}T{format_time_to_hh_mm_ss_sss(t_time)}"
 
-                        # Process 'updated' into the 'drugs' table
                         if isinstance(updated_data, dict):
                             u_date = updated_data.get("date") or date_key
                             u_time = updated_data.get("time")
                             if u_date and u_time:
-                                datetime_str = f"{u_date}T{format_time_to_hh_mm_ss_sss(u_time)}"
-                                post_to_strapi("drugs", {"updated": datetime_str, "user": user_db_id}, sweet_id)
+                                drug_payload["updated"] = f"{u_date}T{format_time_to_hh_mm_ss_sss(u_time)}"
+
+                        if "taken" in drug_payload or "updated" in drug_payload:
+                            # drugs has no 'date' field, so match on the day portion of taken/updated
+                            drug_match = {"$or": [
+                                {"taken": {"$containsi": date_key}},
+                                {"updated": {"$containsi": date_key}},
+                            ]}
+                            upsert_to_strapi("drugs", drug_payload, sweet_id, drug_match)
 
             elif file_name == "favourites":
                 items = data if isinstance(data, list) else [data]
                 print(f"   ⭐ Importing {len(items)} favourites...")
                 for fav in items:
                     fav["user"] = user_db_id
-                    post_to_strapi("favourites", fav)
+                    upsert_to_strapi("favourites", fav, sweet_id, build_match(path=fav.get("path")))
 
             elif file_name == "meta":
                 if isinstance(data, dict):
                     print(f"   ⚙️ Importing meta entries...")
                     for key, value in data.items():
                         if key == "21dayoption":
-                            post_to_strapi("metas", {"twenty_one_day_option": value, "user": user_db_id})
+                            payload = {"twenty_one_day_option": value, "user": user_db_id}
+                            upsert_to_strapi("metas", payload, sweet_id, {"type": {"$null": True}})
                         elif isinstance(value, dict):
                             outer_key = key
                             if any(k in value for k in ["y", "p", "n"]):
-                                post_to_strapi("metas", {"type": outer_key, "y": value.get("y", 0), "p": value.get("p", 0), "n": value.get("n", 0), "user": user_db_id})
+                                payload = {"type": outer_key, "y": value.get("y", 0), "p": value.get("p", 0), "n": value.get("n", 0), "user": user_db_id}
+                                upsert_to_strapi("metas", payload, sweet_id, build_match(type=outer_key))
                             else:
                                 for sub_key, sub_val in value.items():
                                     if isinstance(sub_val, dict):
-                                        post_to_strapi("metas", {"type": outer_key, "subtype": sub_key, "y": sub_val.get("y", 0), "p": sub_val.get("p", 0), "n": sub_val.get("n", 0), "user": user_db_id})
+                                        payload = {"type": outer_key, "subtype": sub_key, "y": sub_val.get("y", 0), "p": sub_val.get("p", 0), "n": sub_val.get("n", 0), "user": user_db_id}
+                                        upsert_to_strapi("metas", payload, sweet_id, build_match(type=outer_key, subtype=sub_key))
 
             elif file_name == "plans":
                 items = data.values() if isinstance(data, dict) else (data if isinstance(data, list) else [])
@@ -256,7 +440,8 @@ def process_user_userdata(sweet_id, container_client):
                     if isinstance(plan, dict):
                         plan_payload = plan.copy()
                         plan_payload["user"] = user_db_id
-                        post_to_strapi("plans", plan_payload)
+                        match = build_match(type=plan.get("type"), time=plan.get("time"))
+                        upsert_to_strapi("plans", plan_payload, sweet_id, match)
 
             elif file_name == "profilers":
                 items = data if isinstance(data, list) else [data]
@@ -270,16 +455,17 @@ def process_user_userdata(sweet_id, container_client):
                         if isinstance(concern_specifics_raw, list):
                             for concern_text in concern_specifics_raw:
                                 if concern_text:
-                                    spec_id = get_or_create_concern_specific(concern_text)
+                                    spec_id = get_or_create_concern_specific(concern_text, sweet_id)
                                     if spec_id:
                                         specifics_ids.append(spec_id)
 
-                        # Updated back to 'specifics' field on profiler
+                        # Using the correct 'specifics' relation field on the profiler table
                         if specifics_ids:
                             profiler_payload["specifics"] = {"connect": specifics_ids}
 
                         profiler_payload["user"] = user_db_id
-                        post_to_strapi("profilers", profiler_payload)
+                        match = build_match(dateComplete=profiler_payload.get("dateComplete"), dueDate=profiler_payload.get("dueDate"))
+                        upsert_to_strapi("profilers", profiler_payload, sweet_id, match)
 
             elif file_name == "reminders":
                 if isinstance(data, dict):
@@ -292,7 +478,7 @@ def process_user_userdata(sweet_id, container_client):
                                 reminder_payload["time"] = format_time_to_hh_mm_ss_sss(reminder_payload["time"])
                             reminder_payload["type"] = reminder_type
                             reminder_payload["user"] = user_db_id
-                            post_to_strapi("reminders", reminder_payload)
+                            upsert_to_strapi("reminders", reminder_payload, sweet_id, build_match(type=reminder_type))
 
             elif file_name == "thoughts":
                 if isinstance(data, dict):
@@ -304,7 +490,8 @@ def process_user_userdata(sweet_id, container_client):
                                     thought_payload = thought_obj.copy()
                                     thought_payload["path"] = path_key
                                     thought_payload["user"] = user_db_id
-                                    post_to_strapi("thoughts", thought_payload)
+                                    match = build_match(path=path_key, negative=thought_payload.get("negative"))
+                                    upsert_to_strapi("thoughts", thought_payload, sweet_id, match)
 
             elif file_name == "goals":
                 if isinstance(data, list):
@@ -315,45 +502,61 @@ def process_user_userdata(sweet_id, container_client):
                             if "status" in goal_payload:
                                 goal_payload["goal_status"] = goal_payload.pop("status")
                             goal_payload["user"] = user_db_id
-                            post_to_strapi("goals", goal_payload)
+                            match = build_match(goaltype=goal_payload.get("goaltype"), reviewDate=goal_payload.get("reviewDate"))
+                            upsert_to_strapi("goals", goal_payload, sweet_id, match)
 
             else:
                 print(f"   ❓ Unhandled file type encountered: '{file_name}'")
 
         except Exception as file_err:
-            print(f"   ❌ Error reading file '{file_name}': {file_err}")
+            err_msg = f"Error reading file '{file_name}': {str(file_err)}"
+            print(f"   ❌ {err_msg}")
+            error_log.append({
+                "sweet_id": sweet_id,
+                "endpoint": file_name,
+                "status_code": None,
+                "response": err_msg,
+                "payload": None
+            })
 
     if file_found_count == 0:
         print(f"⚠️ No files found in Azure under 'userdata/{sweet_id}/'")
 
-def run_mapping_test():
+def run_full_migration():
     try:
-        print("☁️ Connecting to Azure Blob Storage...")
+        print("☁️ Connecting to Azure Blob Storage for Full Migration...")
         blob_service_client = BlobServiceClient.from_connection_string(AZURE_CONNECTION_STRING)
         container_client = blob_service_client.get_container_client(CONTAINER_NAME)
 
-        print("🔍 Scanning 'userdata/' to identify the richest user...")
+        print("🔍 Scanning 'userdata/' to discover all user SweetIDs...")
         blobs = container_client.list_blobs(name_starts_with="userdata/")
-        user_file_counts = {}
+        
+        all_sweet_ids = set()
         for blob in blobs:
             parts = blob.name.split("/")
             if len(parts) >= 3:
-                sweet_id = parts[1]
-                user_file_counts[sweet_id] = user_file_counts.get(sweet_id, 0) + 1
+                all_sweet_ids.add(parts[1])
 
-        richest_sweet_id = max(user_file_counts, key=user_file_counts.get) if user_file_counts else None
-        target_users = [richest_sweet_id] if richest_sweet_id else []
-        if "k.court" not in target_users:
-            target_users.append("k.court")
+        print(f"🚀 Found {len(all_sweet_ids)} user folders to process.\n")
 
-        for sweet_id in target_users:
+        for sweet_id in sorted(all_sweet_ids):
             process_user_userdata(sweet_id, container_client)
 
         print("\n========================================")
-        print("✨ Userdata Mapping Diagnostic Complete!")
+        print("✨ Full Userdata Migration Finished!")
         print("========================================")
+
+        if error_log:
+            error_filename = "import_user_content_errors.json"
+            with open(error_filename, "w", encoding="utf-8") as f:
+                json.dump(error_log, f, indent=2)
+            print(f" ⚠️ {len(error_log)} errors were encountered and logged to '{error_filename}'.")
+        else:
+            print(" 🎉 Zero errors encountered! All userdata imported successfully.")
+        print("========================================")
+
     except Exception as e:
-        print(f"❌ Critical error during test execution: {e}")
+        print(f"❌ Critical error during migration execution: {e}")
 
 if __name__ == "__main__":
-    run_mapping_test()
+    run_full_migration()

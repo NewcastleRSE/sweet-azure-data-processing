@@ -14,25 +14,43 @@ When inserting link in markdown to a video, need to use the copy url button to f
  • Role: 'sysadmin' (Found in 3 user records)
  • Role: 'user' (Found in 1072 user records)
 
- _init contains raw text date that maps to init field in the user table
-contacts contains an array of json objects that match with the contact table
-diary contains a json object, this contains keys that are a date and adherence and sideeffects and notes objects within each date. there is an adherance table and a side_effect and note tables that match these fields and also contain a date that should be taken from the key.
-favourites match onto the favourite collection
-meta contains one key 21dayoption that matches the meta table containing a field twenty_one_day_option
-plans matches the plan collection
-profilers matches profiler
-reminders matches reminder. they keys are used to match to the 'type' field of each entry and the contents of each json object matches the fields within the sub-objects
-thoughts matches thought collection. this contains a json object. each key matches to the path field, and there is a list of json objects for each path that map onto the negative and positive fields. There might be multiple db entries for each path.
-goals matches goal collection and contains an array of json objects, each of which match onto the collection fields.
-use the test user identified in the code, but also do it for the user whose SweetID is k.court.
-integrate the above and add the data into strapi, logging any issues or data that you don't know how to handle so I can improve the script
+ 
 
-todo monday: run script again after clearning db, then run with k.court in staging to check goals and thoughts
+
+content import:
+1. import_all_to_strapi.py
+Do not run this again - use a dump file exported from Kate's local copy as this is correct. 
 
 user data import:
 
-1. test things work with import-test-user
+1. test things work with import-test-user (check mobile number as I missed this first pass)
 2. run on all users with import_all_users
 3. check import_errors and resolve any issues
-4. test works with test_userdata_mapping.py. I did this once with the production and once with staging (where you can use Kate's data, saved under the username k.court)
+4. test works with test_userdata_mapping.py I did this once with the production and once with staging (where you can use Kate's data, saved under the username k.court)
+5. run for all with imprt_all_userdata.py
+6. check errors in import_user_content_errors.json
+7. use exportUserRolesToCSV to identify the roles of various users so can add those with staff role to the admin UI.
+Production emails to be added as admins:
+sarah-jane.stewart@ucl.ac.uk
+sue.thompson@ncl.ac.uk
+lmcgeagh@brookes.ac.uk
+kate.court@ncl.ac.uk
+raegan.barrows@warwick.ac.uk
+kiran.thomas@nhs.net
+M.L.Dalby@warwick.ac.uk
 
+8. add registration codes to the collection, import_registration_codes.py
+
+Staging emails to be added as admins:
+
+
+❌ User with SweetID 'A0002' was not found in Strapi. Skipping userdata.
+
+
+where are contact preferences stored in the data? The above script doesn't include them
+
+
+
+
+
+import from prod to staging: all pages and component tables, messages table. 
